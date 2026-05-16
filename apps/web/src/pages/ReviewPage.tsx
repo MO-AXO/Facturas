@@ -14,8 +14,10 @@ export function ReviewPage() {
   const { data: invoice, isLoading } = useQuery({
     queryKey: ['invoice', id],
     queryFn: () => invoicesApi.get(id!).then((r) => r.data),
-    refetchInterval: (data) =>
-      data?.status === 'pending' || data?.status === 'extracting' ? 3000 : false,
+    refetchInterval: (query) => {
+      const d = query.state.data
+      return d?.status === 'pending' || d?.status === 'extracting' ? 3000 : false
+    },
   })
 
   if (isLoading) {
