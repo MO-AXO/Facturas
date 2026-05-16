@@ -1,14 +1,6 @@
-/**
- * Worker: procesamiento de facturas
- * Se activa cuando se sube una nueva factura
- * 1. Descarga el archivo de Supabase Storage
- * 2. Llama a Claude para extraer datos
- * 3. Hace matching de líneas contra el catálogo
- * 4. Guarda resultados y pone la factura en status "review"
- */
 import { Worker } from 'bullmq'
 import { redis } from '../lib/redis.js'
-import { supabase } from '../lib/supabase.js'
+import { query, queryOne } from '../lib/db.js'
 import { extractInvoiceData } from '../services/extraction.js'
 import { matchLine } from '../services/matching.js'
 import type { InvoiceJobData } from '../lib/queue.js'
@@ -17,124 +9,103 @@ export function startInvoiceWorker() {
   const worker = new Worker<InvoiceJobData>(
     'invoice-processing',
     async (job) => {
-      const { invoiceId, storagePath, fileType } = job.data
+      const { invoiceId, base64, mediaType, fileName } = job.data
 
-      console.log(`[InvoiceWorker] Procesando factura ${invoiceId}`)
+      console.log(`[InvoiceWorker] Procesando factura ${invoiceId} (${fileName})`)
 
-      // ── 1. Marcar como extrayendo ──────────────────────────────────────────
-      await supabase
-        .from('invoices')
-        .update({ status: 'extracting' })
-        .eq('id', invoiceId)
+      // ── 1. Extraer con Claude ──────────────────────────────────────────────
+      await job.updateProgress(10)
+      const extracted = await extractInvoiceData(base64, mediaType as any)
 
-      // ── 2. Descargar archivo de Storage ───────────────────────────────────
-      const { data: fileData, error: downloadError } = await supabase.storage
-        .from('facturas')
-        .download(storagePath)
-
-      if (downloadError || !fileData) {
-        throw new Error(`Error descargando archivo: ${downloadError?.message}`)
-      }
-
-      const arrayBuffer = await fileData.arrayBuffer()
-      const base64 = Buffer.from(arrayBuffer).toString('base64')
-      const mediaType = fileType as any
-
-      // ── 3. Extraer datos con Claude ────────────────────────────────────────
-      await job.updateProgress(25)
-      const extracted = await extractInvoiceData(base64, mediaType)
-
-      // ── 4. Buscar/crear proveedor ─────────────────────────────────────────
+      // ── 2. Resolver proveedor ──────────────────────────────────────────────
+      await job.updateProgress(40)
       let supplierId: string | null = null
 
       if (extracted.supplier_name) {
         // Buscar por alias exacto
-        const { data: alias } = await supabase
-          .from('supplier_aliases')
-          .select('supplier_id')
-          .ilike('alias', extracted.supplier_name.trim())
-          .single()
+        const byAlias = await queryOne<{ supplier_id: string }>(`
+          select supplier_id from supplier_aliases
+          where lower(alias) = lower($1)
+          limit 1
+        `, [extracted.supplier_name.trim()])
 
-        if (alias) {
-          supplierId = alias.supplier_id
+        if (byAlias) {
+          supplierId = byAlias.supplier_id
         } else if (extracted.supplier_rfc) {
           // Buscar por RFC
-          const { data: supplier } = await supabase
-            .from('suppliers')
-            .select('id')
-            .eq('rfc', extracted.supplier_rfc)
-            .single()
-
-          supplierId = supplier?.id ?? null
+          const byRfc = await queryOne<{ id: string }>(`
+            select id from suppliers where rfc = $1 limit 1
+          `, [extracted.supplier_rfc])
+          supplierId = byRfc?.id ?? null
         }
       }
 
-      // ── 5. Actualizar header de factura ───────────────────────────────────
-      await supabase
-        .from('invoices')
-        .update({
-          supplier_id: supplierId,
-          folio: extracted.folio,
-          invoice_date: extracted.invoice_date,
-          subtotal: extracted.subtotal,
-          tax_amount: extracted.tax_amount,
-          total: extracted.total,
-          currency: extracted.currency ?? 'MXN',
-          raw_extraction: extracted as any,
-          extracted_at: new Date().toISOString(),
-        })
-        .eq('id', invoiceId)
+      // ── 3. Actualizar header de factura ────────────────────────────────────
+      await query(`
+        update invoices set
+          supplier_id    = $1,
+          folio          = $2,
+          invoice_date   = $3,
+          subtotal       = $4,
+          tax_amount     = $5,
+          total          = $6,
+          currency       = $7,
+          raw_extraction = $8,
+          extracted_at   = now(),
+          updated_at     = now()
+        where id = $9
+      `, [
+        supplierId,
+        extracted.folio,
+        extracted.invoice_date,
+        extracted.subtotal,
+        extracted.tax_amount,
+        extracted.total,
+        extracted.currency ?? 'MXN',
+        JSON.stringify(extracted),
+        invoiceId,
+      ])
 
-      // ── 6. Procesar y hacer match de cada línea ───────────────────────────
-      await job.updateProgress(50)
+      // ── 4. Match de líneas ─────────────────────────────────────────────────
+      await job.updateProgress(60)
 
-      const lineInserts = await Promise.all(
-        extracted.lines.map(async (line, idx) => {
-          const match = await matchLine(line, supplierId)
-          return {
-            invoice_id: invoiceId,
-            line_number: idx + 1,
-            raw_description: line.description,
-            raw_quantity: line.quantity,
-            raw_unit: line.unit,
-            raw_unit_price: line.unit_price,
-            raw_subtotal: line.subtotal,
-            sku_id: match.sku_id,
-            matched_quantity: match.matched_quantity,
-            matched_unit: match.matched_unit,
-            matched_unit_price: match.matched_unit_price,
-            match_status: match.match_status,
-            match_confidence: match.match_confidence,
-            match_method: match.match_method,
-          }
-        })
-      )
+      for (let i = 0; i < extracted.lines.length; i++) {
+        const line = extracted.lines[i]
+        const match = await matchLine(line, supplierId)
 
-      await supabase.from('invoice_lines').insert(lineInserts)
+        await query(`
+          insert into invoice_lines (
+            invoice_id, line_number,
+            raw_description, raw_quantity, raw_unit, raw_unit_price, raw_subtotal,
+            sku_id, matched_quantity, matched_unit, matched_unit_price,
+            match_status, match_confidence, match_method
+          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        `, [
+          invoiceId, i + 1,
+          line.description, line.quantity, line.unit, line.unit_price, line.subtotal,
+          match.sku_id, match.matched_quantity, match.matched_unit, match.matched_unit_price,
+          match.match_status, match.match_confidence, match.match_method,
+        ])
+      }
 
-      // ── 7. Poner en revisión ───────────────────────────────────────────────
-      await job.updateProgress(90)
-      await supabase
-        .from('invoices')
-        .update({ status: 'review' })
-        .eq('id', invoiceId)
-
+      // ── 5. Poner en revisión ───────────────────────────────────────────────
       await job.updateProgress(100)
-      console.log(`[InvoiceWorker] Factura ${invoiceId} lista para revisión`)
+      await query(`
+        update invoices set status = 'review', updated_at = now() where id = $1
+      `, [invoiceId])
+
+      console.log(`[InvoiceWorker] Factura ${invoiceId} lista para revisión (${extracted.lines.length} líneas)`)
     },
-    {
-      connection: redis,
-      concurrency: 3,
-    }
+    { connection: redis, concurrency: 3 }
   )
 
   worker.on('failed', async (job, err) => {
+    console.error(`[InvoiceWorker] Job ${job?.id} fallido:`, err.message)
     if (job) {
-      console.error(`[InvoiceWorker] Job ${job.id} fallido:`, err.message)
-      await supabase
-        .from('invoices')
-        .update({ status: 'error', error_message: err.message })
-        .eq('id', job.data.invoiceId)
+      await query(`
+        update invoices set status = 'error', error_message = $1, updated_at = now()
+        where id = $2
+      `, [err.message, job.data.invoiceId])
     }
   })
 

@@ -36,9 +36,8 @@ export type Invoice = {
   total: number | null
   currency: string
   status: InvoiceStatus
-  storage_path: string
+  file_name: string | null
   file_type: string | null
-  signed_url?: string
   created_at: string
   extracted_at: string | null
   approved_at: string | null

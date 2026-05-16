@@ -1,7 +1,6 @@
 import { Queue } from 'bullmq'
 import { redis } from './redis.js'
 
-// Job: procesar factura subida (OCR con Claude)
 export const invoiceQueue = new Queue('invoice-processing', {
   connection: redis,
   defaultJobOptions: {
@@ -12,7 +11,6 @@ export const invoiceQueue = new Queue('invoice-processing', {
   },
 })
 
-// Job: actualizar price_history + evaluar alertas post-aprobación
 export const priceUpdateQueue = new Queue('price-update', {
   connection: redis,
   defaultJobOptions: {
@@ -23,8 +21,9 @@ export const priceUpdateQueue = new Queue('price-update', {
 
 export type InvoiceJobData = {
   invoiceId: string
-  storagePath: string
-  fileType: string
+  base64: string        // imagen en memoria, no en disco
+  mediaType: string
+  fileName: string
 }
 
 export type PriceUpdateJobData = {

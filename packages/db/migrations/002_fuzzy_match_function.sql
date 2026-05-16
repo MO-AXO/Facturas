@@ -1,25 +1,24 @@
 -- ============================================================
 -- Migración 002: Función de fuzzy matching con trigrams
--- Usada por el backend para el matching de SKU aliases
 -- ============================================================
 
 create or replace function match_sku_alias_fuzzy(
   p_description text,
   p_supplier_id uuid default null,
-  p_limit int default 5,
-  p_threshold float default 0.3
+  p_limit       int  default 5,
+  p_threshold   float default 0.3
 )
 returns table (
-  alias_id      uuid,
-  sku_id        uuid,
-  sku_code      text,
-  sku_name      text,
-  sku_unit      text,
-  alias         text,
-  unit_alias    text,
-  unit_factor   numeric,
-  similarity    float,
-  supplier_id   uuid
+  alias_id    uuid,
+  sku_id      uuid,
+  sku_code    text,
+  sku_name    text,
+  sku_unit    text,
+  alias       text,
+  unit_alias  text,
+  unit_factor numeric,
+  similarity  float,
+  supplier_id uuid
 ) language sql stable as $$
   select
     sa.id          as alias_id,

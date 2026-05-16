@@ -1,10 +1,15 @@
 import type { FastifyInstance } from 'fastify'
-import { supabase } from '../lib/supabase.js'
+import { query, queryOne } from '../lib/db.js'
 import { invoiceQueue, priceUpdateQueue } from '../lib/queue.js'
 import { learnAlias } from '../services/matching.js'
+import { extractInvoiceData } from '../services/extraction.js'
+import { matchLine } from '../services/matching.js'
 
 export async function invoiceRoutes(fastify: FastifyInstance) {
-  // ── POST /invoices — subir nueva factura ───────────────────────────────────
+
+  // ── POST /invoices — subir factura y procesar en el mismo request ──────────
+  // Sin storage: recibimos el archivo, lo procesamos con Claude en memoria,
+  // guardamos solo los datos extraídos en PostgreSQL.
   fastify.post('/invoices', async (request, reply) => {
     const data = await (request as any).file()
 
@@ -18,102 +23,107 @@ export async function invoiceRoutes(fastify: FastifyInstance) {
     }
 
     const buffer = await data.toBuffer()
-    const filename = `${Date.now()}-${data.filename}`
-    const storagePath = `uploads/${filename}`
+    const base64  = buffer.toString('base64')
+    const mediaType = data.mimetype as any
 
-    // Subir a Supabase Storage
-    const { error: uploadError } = await supabase.storage
-      .from('facturas')
-      .upload(storagePath, buffer, { contentType: data.mimetype })
+    // Crear registro inicial
+    const invoice = await queryOne<{ id: string }>(`
+      insert into invoices (file_name, file_type, status)
+      values ($1, $2, 'extracting')
+      returning id
+    `, [data.filename, data.mimetype])
 
-    if (uploadError) {
-      return reply.status(500).send({ error: `Error subiendo archivo: ${uploadError.message}` })
+    if (!invoice) {
+      return reply.status(500).send({ error: 'Error creando factura' })
     }
 
-    // Crear registro de factura
-    const { data: invoice, error: insertError } = await supabase
-      .from('invoices')
-      .insert({
-        storage_path: storagePath,
-        storage_bucket: 'facturas',
-        file_type: data.mimetype,
-        status: 'pending',
-      })
-      .select('id')
-      .single()
-
-    if (insertError || !invoice) {
-      return reply.status(500).send({ error: `Error creando factura: ${insertError?.message}` })
-    }
-
-    // Encolar job de procesamiento
+    // Encolar job de extracción — pasamos base64 en el job (imagen en memoria)
     await invoiceQueue.add('process', {
       invoiceId: invoice.id,
-      storagePath,
-      fileType: data.mimetype,
+      base64,
+      mediaType,
+      fileName: data.filename,
     })
 
-    return reply.status(201).send({ invoiceId: invoice.id, status: 'pending' })
+    return reply.status(201).send({ invoiceId: invoice.id, status: 'extracting' })
   })
 
-  // ── GET /invoices — listar facturas ───────────────────────────────────────
+  // ── GET /invoices ──────────────────────────────────────────────────────────
   fastify.get('/invoices', async (request, reply) => {
-    const query = request.query as any
-    const status = query.status
-    const page = parseInt(query.page ?? '1')
-    const limit = parseInt(query.limit ?? '20')
+    const q = request.query as any
+    const status = q.status
+    const page   = parseInt(q.page  ?? '1')
+    const limit  = parseInt(q.limit ?? '20')
     const offset = (page - 1) * limit
 
-    let q = supabase
-      .from('invoices')
-      .select(`
-        id, folio, invoice_date, total, currency, status,
-        created_at, extracted_at, approved_at,
-        suppliers ( id, name )
-      `, { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1)
+    const whereClause = status ? `where i.status = $3` : ''
+    const params: any[] = [limit, offset]
+    if (status) params.push(status)
 
-    if (status) q = q.eq('status', status)
+    const rows = await query<any>(`
+      select
+        i.id, i.folio, i.invoice_date, i.total, i.currency, i.status,
+        i.created_at, i.extracted_at, i.approved_at, i.file_name,
+        s.id as supplier_id, s.name as supplier_name
+      from invoices i
+      left join suppliers s on s.id = i.supplier_id
+      ${whereClause}
+      order by i.created_at desc
+      limit $1 offset $2
+    `, params)
 
-    const { data, count, error } = await q
+    const countRow = await queryOne<{ count: string }>(`
+      select count(*) as count from invoices ${status ? 'where status = $1' : ''}
+    `, status ? [status] : [])
 
-    if (error) return reply.status(500).send({ error: error.message })
-    return { data, total: count, page, limit }
+    const data = rows.map(r => ({
+      ...r,
+      suppliers: r.supplier_id ? { id: r.supplier_id, name: r.supplier_name } : null,
+    }))
+
+    return { data, total: parseInt(countRow?.count ?? '0'), page, limit }
   })
 
-  // ── GET /invoices/:id — detalle de factura con líneas ────────────────────
+  // ── GET /invoices/:id ──────────────────────────────────────────────────────
   fastify.get('/invoices/:id', async (request, reply) => {
     const { id } = request.params as { id: string }
 
-    const { data: invoice, error } = await supabase
-      .from('invoices')
-      .select(`
-        *,
-        suppliers ( id, name, rfc ),
-        invoice_lines (
-          id, line_number,
-          raw_description, raw_quantity, raw_unit, raw_unit_price, raw_subtotal,
-          sku_id, matched_quantity, matched_unit, matched_unit_price,
-          match_status, match_confidence, match_method,
-          override_sku_id, override_notes,
-          skus ( id, code, name, unit )
-        )
-      `)
-      .eq('id', id)
-      .single()
+    const invoice = await queryOne<any>(`
+      select
+        i.*,
+        s.id as supplier_id, s.name as supplier_name, s.rfc as supplier_rfc
+      from invoices i
+      left join suppliers s on s.id = i.supplier_id
+      where i.id = $1
+    `, [id])
 
-    if (error) return reply.status(404).send({ error: 'Factura no encontrada' })
+    if (!invoice) return reply.status(404).send({ error: 'Factura no encontrada' })
 
-    // Generar URL firmada para ver la imagen
-    const { data: signedUrl } = await supabase.storage
-      .from(invoice.storage_bucket)
-      .createSignedUrl(invoice.storage_path, 3600)  // 1 hora
+    const lines = await query<any>(`
+      select
+        il.*,
+        sk.id as sku_id_rel, sk.code as sku_code, sk.name as sku_name, sk.unit as sku_unit
+      from invoice_lines il
+      left join skus sk on sk.id = il.sku_id
+      where il.invoice_id = $1
+      order by il.line_number
+    `, [id])
 
-    return { ...invoice, signed_url: signedUrl?.signedUrl }
+    return {
+      ...invoice,
+      suppliers: invoice.supplier_id
+        ? { id: invoice.supplier_id, name: invoice.supplier_name, rfc: invoice.supplier_rfc }
+        : null,
+      invoice_lines: lines.map(l => ({
+        ...l,
+        skus: l.sku_id_rel
+          ? { id: l.sku_id_rel, code: l.sku_code, name: l.sku_name, unit: l.sku_unit }
+          : null,
+      })),
+    }
   })
 
-  // ── PATCH /invoices/:id/lines/:lineId — corregir línea ───────────────────
+  // ── PATCH /invoices/:id/lines/:lineId ─────────────────────────────────────
   fastify.patch('/invoices/:id/lines/:lineId', async (request, reply) => {
     const { lineId } = request.params as { id: string; lineId: string }
     const body = request.body as {
@@ -124,81 +134,77 @@ export async function invoiceRoutes(fastify: FastifyInstance) {
       override_notes?: string
     }
 
-    const { error } = await supabase
-      .from('invoice_lines')
-      .update({
-        override_sku_id: body.sku_id,
-        sku_id: body.sku_id,
-        matched_quantity: body.matched_quantity,
-        matched_unit: body.matched_unit,
-        matched_unit_price: body.matched_unit_price,
-        override_notes: body.override_notes,
-        match_status: 'confirmed',
-        match_confidence: 1.0,
-      })
-      .eq('id', lineId)
+    await query(`
+      update invoice_lines set
+        sku_id             = $1,
+        override_sku_id    = $1,
+        matched_quantity   = $2,
+        matched_unit       = $3,
+        matched_unit_price = $4,
+        override_notes     = $5,
+        match_status       = 'confirmed',
+        match_confidence   = 1.0,
+        updated_at         = now()
+      where id = $6
+    `, [body.sku_id, body.matched_quantity, body.matched_unit,
+        body.matched_unit_price, body.override_notes, lineId])
 
-    if (error) return reply.status(500).send({ error: error.message })
     return { ok: true }
   })
 
-  // ── POST /invoices/:id/approve — aprobar factura ─────────────────────────
+  // ── POST /invoices/:id/approve ─────────────────────────────────────────────
   fastify.post('/invoices/:id/approve', async (request, reply) => {
     const { id } = request.params as { id: string }
     const body = request.body as { approved_by?: string }
 
-    // Verificar que la factura está en estado "review"
-    const { data: invoice } = await supabase
-      .from('invoices')
-      .select('status, supplier_id')
-      .eq('id', id)
-      .single()
+    const invoice = await queryOne<any>(`
+      select status, supplier_id from invoices where id = $1
+    `, [id])
 
     if (!invoice || invoice.status !== 'review') {
-      return reply.status(400).send({ error: 'La factura debe estar en estado "review" para aprobarse' })
+      return reply.status(400).send({ error: 'La factura debe estar en estado "review"' })
     }
 
-    // Aprender aliases de las líneas confirmadas/auto-matched
-    const { data: lines } = await supabase
-      .from('invoice_lines')
-      .select('raw_description, raw_unit, sku_id, matched_unit, match_status')
-      .eq('invoice_id', id)
-      .not('sku_id', 'is', null)
-      .in('match_status', ['confirmed', 'auto'])
+    // Aprender aliases de líneas auto/confirmadas
+    if (invoice.supplier_id) {
+      const lines = await query<any>(`
+        select raw_description, raw_unit, sku_id, match_status
+        from invoice_lines
+        where invoice_id = $1
+          and sku_id is not null
+          and match_status in ('confirmed', 'auto')
+      `, [id])
 
-    if (lines && invoice.supplier_id) {
       for (const line of lines) {
         await learnAlias({
-          skuId: line.sku_id!,
+          skuId: line.sku_id,
           supplierId: invoice.supplier_id,
           alias: line.raw_description,
           unitAlias: line.raw_unit,
-          unitFactor: 1,  // TODO: calcular factor real
+          unitFactor: 1,
           confirmedBy: body.approved_by ?? 'system',
         })
       }
     }
 
-    // Encolar job de actualización de precios
     await priceUpdateQueue.add('update-prices', {
       invoiceId: id,
       approvedBy: body.approved_by ?? 'system',
     })
 
-    return { ok: true, message: 'Factura enviada a aprobación' }
+    return { ok: true }
   })
 
-  // ── POST /invoices/:id/reject — rechazar factura ─────────────────────────
+  // ── POST /invoices/:id/reject ──────────────────────────────────────────────
   fastify.post('/invoices/:id/reject', async (request, reply) => {
     const { id } = request.params as { id: string }
     const body = request.body as { reason?: string }
 
-    const { error } = await supabase
-      .from('invoices')
-      .update({ status: 'rejected', notes: body.reason })
-      .eq('id', id)
+    await query(`
+      update invoices set status = 'rejected', notes = $1, updated_at = now()
+      where id = $2
+    `, [body.reason ?? null, id])
 
-    if (error) return reply.status(500).send({ error: error.message })
     return { ok: true }
   })
 }

@@ -1,29 +1,28 @@
 import type { FastifyInstance } from 'fastify'
-import { supabase } from '../lib/supabase.js'
+import { query, queryOne } from '../lib/db.js'
 
 export async function catalogRoutes(fastify: FastifyInstance) {
-  // ── GET /skus — buscar SKUs del catálogo ─────────────────────────────────
+
+  // ── GET /skus ──────────────────────────────────────────────────────────────
   fastify.get('/skus', async (request, reply) => {
-    const query = request.query as any
-    const search = query.search
-    const category = query.category
+    const q = request.query as any
+    const search   = q.search   ?? ''
+    const category = q.category ?? ''
 
-    let q = supabase
-      .from('skus')
-      .select('id, code, name, description, category, unit, active')
-      .eq('active', true)
-      .order('name')
-      .limit(50)
+    const rows = await query<any>(`
+      select id, code, name, description, category, unit, active
+      from skus
+      where active = true
+        and ($1 = '' or name ilike '%' || $1 || '%')
+        and ($2 = '' or category = $2)
+      order by name
+      limit 50
+    `, [search, category])
 
-    if (search) q = q.ilike('name', `%${search}%`)
-    if (category) q = q.eq('category', category)
-
-    const { data, error } = await q
-    if (error) return reply.status(500).send({ error: error.message })
-    return { data }
+    return { data: rows }
   })
 
-  // ── POST /skus — crear nuevo SKU ─────────────────────────────────────────
+  // ── POST /skus ─────────────────────────────────────────────────────────────
   fastify.post('/skus', async (request, reply) => {
     const body = request.body as {
       code: string
@@ -33,87 +32,109 @@ export async function catalogRoutes(fastify: FastifyInstance) {
       unit: string
     }
 
-    const { data, error } = await supabase
-      .from('skus')
-      .insert(body)
-      .select('id, code, name')
-      .single()
+    const row = await queryOne<any>(`
+      insert into skus (code, name, description, category, unit)
+      values ($1, $2, $3, $4, $5)
+      returning id, code, name
+    `, [body.code, body.name, body.description ?? null, body.category ?? null, body.unit])
 
-    if (error) return reply.status(500).send({ error: error.message })
-    return reply.status(201).send(data)
+    return reply.status(201).send(row)
   })
 
-  // ── GET /suppliers — listar proveedores ───────────────────────────────────
-  fastify.get('/suppliers', async (request, reply) => {
-    const { data, error } = await supabase
-      .from('suppliers')
-      .select('id, name, rfc, email, active')
-      .eq('active', true)
-      .order('name')
-
-    if (error) return reply.status(500).send({ error: error.message })
-    return { data }
+  // ── GET /suppliers ─────────────────────────────────────────────────────────
+  fastify.get('/suppliers', async (_request, reply) => {
+    const rows = await query<any>(`
+      select id, name, rfc, email, active
+      from suppliers
+      where active = true
+      order by name
+    `)
+    return { data: rows }
   })
 
-  // ── GET /price-history/:skuId — historial de precios de un SKU ───────────
+  // ── POST /suppliers ────────────────────────────────────────────────────────
+  fastify.post('/suppliers', async (request, reply) => {
+    const body = request.body as {
+      name: string
+      rfc?: string
+      email?: string
+      phone?: string
+    }
+
+    const row = await queryOne<any>(`
+      insert into suppliers (name, rfc, email, phone)
+      values ($1, $2, $3, $4)
+      returning id, name, rfc
+    `, [body.name, body.rfc ?? null, body.email ?? null, body.phone ?? null])
+
+    return reply.status(201).send(row)
+  })
+
+  // ── GET /price-history/:skuId ──────────────────────────────────────────────
   fastify.get('/price-history/:skuId', async (request, reply) => {
     const { skuId } = request.params as { skuId: string }
-    const query = request.query as any
-    const supplierId = query.supplier_id
-    const days = parseInt(query.days ?? '90')
+    const q = request.query as any
+    const supplierId = q.supplier_id ?? null
+    const days = parseInt(q.days ?? '90')
 
-    const since = new Date()
-    since.setDate(since.getDate() - days)
+    const rows = await query<any>(`
+      select
+        ph.id, ph.invoice_date, ph.unit_price, ph.unit, ph.currency,
+        s.id as supplier_id, s.name as supplier_name
+      from price_history ph
+      join suppliers s on s.id = ph.supplier_id
+      where ph.sku_id = $1
+        and ph.invoice_date >= current_date - ($2 || ' days')::interval
+        and ($3::uuid is null or ph.supplier_id = $3::uuid)
+      order by ph.invoice_date desc
+    `, [skuId, days, supplierId])
 
-    let q = supabase
-      .from('price_history')
-      .select(`
-        id, invoice_date, unit_price, unit, currency,
-        suppliers ( id, name )
-      `)
-      .eq('sku_id', skuId)
-      .gte('invoice_date', since.toISOString().split('T')[0])
-      .order('invoice_date', { ascending: false })
-
-    if (supplierId) q = q.eq('supplier_id', supplierId)
-
-    const { data, error } = await q
-    if (error) return reply.status(500).send({ error: error.message })
-    return { data }
+    return {
+      data: rows.map(r => ({
+        ...r,
+        suppliers: { id: r.supplier_id, name: r.supplier_name },
+      }))
+    }
   })
 
-  // ── GET /alerts — alertas de precio activas ───────────────────────────────
-  fastify.get('/alerts', async (request, reply) => {
-    const { data, error } = await supabase
-      .from('price_alerts')
-      .select(`
-        id, alert_type, status, change_pct, previous_price, new_price, message, created_at,
-        skus ( id, code, name ),
-        suppliers ( id, name )
-      `)
-      .eq('status', 'active')
-      .order('created_at', { ascending: false })
-      .limit(50)
+  // ── GET /alerts ────────────────────────────────────────────────────────────
+  fastify.get('/alerts', async (_request, reply) => {
+    const rows = await query<any>(`
+      select
+        pa.id, pa.alert_type, pa.status, pa.change_pct,
+        pa.previous_price, pa.new_price, pa.message, pa.created_at,
+        sk.id as sku_id, sk.code as sku_code, sk.name as sku_name,
+        sup.id as supplier_id, sup.name as supplier_name
+      from price_alerts pa
+      join skus sk on sk.id = pa.sku_id
+      join suppliers sup on sup.id = pa.supplier_id
+      where pa.status = 'active'
+      order by pa.created_at desc
+      limit 50
+    `)
 
-    if (error) return reply.status(500).send({ error: error.message })
-    return { data }
+    return {
+      data: rows.map(r => ({
+        ...r,
+        skus:      { id: r.sku_id,      code: r.sku_code, name: r.sku_name },
+        suppliers: { id: r.supplier_id, name: r.supplier_name },
+      }))
+    }
   })
 
-  // ── PATCH /alerts/:id/acknowledge — marcar alerta como vista ─────────────
+  // ── PATCH /alerts/:id/acknowledge ─────────────────────────────────────────
   fastify.patch('/alerts/:id/acknowledge', async (request, reply) => {
     const { id } = request.params as { id: string }
     const body = request.body as { acknowledged_by?: string }
 
-    const { error } = await supabase
-      .from('price_alerts')
-      .update({
-        status: 'acknowledged',
-        acknowledged_by: body.acknowledged_by,
-        acknowledged_at: new Date().toISOString(),
-      })
-      .eq('id', id)
+    await query(`
+      update price_alerts set
+        status          = 'acknowledged',
+        acknowledged_by = $1,
+        acknowledged_at = now()
+      where id = $2
+    `, [body.acknowledged_by ?? 'system', id])
 
-    if (error) return reply.status(500).send({ error: error.message })
     return { ok: true }
   })
 }
