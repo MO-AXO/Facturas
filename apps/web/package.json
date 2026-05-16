@@ -15,7 +15,8 @@
     "react-router-dom": "^6.23.0",
     "@tanstack/react-query": "^5.40.0",
     "axios": "^1.7.0",
-    "clsx": "^2.1.0"
+    "clsx": "^2.1.0",
+    "serve": "^14.2.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.0",
