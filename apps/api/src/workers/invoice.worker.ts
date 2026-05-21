@@ -17,26 +17,57 @@ export function startInvoiceWorker() {
       await job.updateProgress(10)
       const extracted = await extractInvoiceData(base64, mediaType as any)
 
-      // ── 2. Resolver proveedor ──────────────────────────────────────────────
+      // ── 2. Resolver proveedor (o crearlo si no existe) ────────────────────
       await job.updateProgress(40)
       let supplierId: string | null = null
 
       if (extracted.supplier_name) {
-        // Buscar por alias exacto
+        const name = extracted.supplier_name.trim()
+        const rfc  = extracted.supplier_rfc?.trim() ?? null
+
+        // 1) Buscar por alias exacto
         const byAlias = await queryOne<{ supplier_id: string }>(`
           select supplier_id from supplier_aliases
           where lower(alias) = lower($1)
           limit 1
-        `, [extracted.supplier_name.trim()])
+        `, [name])
 
         if (byAlias) {
           supplierId = byAlias.supplier_id
-        } else if (extracted.supplier_rfc) {
-          // Buscar por RFC
+        } else if (rfc) {
+          // 2) Buscar por RFC
           const byRfc = await queryOne<{ id: string }>(`
             select id from suppliers where rfc = $1 limit 1
-          `, [extracted.supplier_rfc])
+          `, [rfc])
           supplierId = byRfc?.id ?? null
+        }
+
+        if (!supplierId) {
+          // 3) Buscar por nombre exacto (case-insensitive)
+          const byName = await queryOne<{ id: string }>(`
+            select id from suppliers where lower(name) = lower($1) limit 1
+          `, [name])
+          supplierId = byName?.id ?? null
+        }
+
+        if (!supplierId) {
+          // 4) No existe — crear el proveedor
+          const newSupplier = await queryOne<{ id: string }>(`
+            insert into suppliers (name, rfc)
+            values ($1, $2)
+            returning id
+          `, [name, rfc])
+          supplierId = newSupplier?.id ?? null
+          console.log(`[InvoiceWorker] Proveedor creado: "${name}" (${rfc ?? 'sin RFC'})`)
+        }
+
+        // Registrar el nombre exacto como alias para futuros matches
+        if (supplierId) {
+          await query(`
+            insert into supplier_aliases (supplier_id, alias, source)
+            values ($1, $2, 'auto')
+            on conflict (alias) do nothing
+          `, [supplierId, name])
         }
       }
 
