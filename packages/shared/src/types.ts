@@ -2,7 +2,7 @@
 
 export type InvoiceStatus = 'pending' | 'extracting' | 'review' | 'approved' | 'rejected' | 'error'
 export type MatchStatus = 'auto' | 'suggested' | 'manual' | 'confirmed' | 'new_sku'
-export type AlertType = 'price_increase' | 'price_increase_avg' | 'recipe_cost_threshold'
+export type AlertType = 'price_increase' | 'price_decrease' | 'price_increase_avg'
 export type AlertStatus = 'active' | 'acknowledged' | 'resolved'
 
 export const CONFIDENCE_AUTO = 0.92
