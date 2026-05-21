@@ -155,7 +155,7 @@ export async function invoiceRoutes(fastify: FastifyInstance) {
   // ── POST /invoices/:id/approve ─────────────────────────────────────────────
   fastify.post('/invoices/:id/approve', async (request, reply) => {
     const { id } = request.params as { id: string }
-    const body = request.body as { approved_by?: string }
+    const body = (request.body as { approved_by?: string }) ?? {}
 
     const invoice = await queryOne<any>(`
       select status, supplier_id from invoices where id = $1
@@ -198,7 +198,7 @@ export async function invoiceRoutes(fastify: FastifyInstance) {
   // ── POST /invoices/:id/reject ──────────────────────────────────────────────
   fastify.post('/invoices/:id/reject', async (request, reply) => {
     const { id } = request.params as { id: string }
-    const body = request.body as { reason?: string }
+    const body = (request.body as { reason?: string }) ?? {}
 
     await query(`
       update invoices set status = 'rejected', notes = $1, updated_at = now()

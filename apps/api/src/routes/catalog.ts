@@ -125,7 +125,7 @@ export async function catalogRoutes(fastify: FastifyInstance) {
   // ── PATCH /alerts/:id/acknowledge ─────────────────────────────────────────
   fastify.patch('/alerts/:id/acknowledge', async (request, reply) => {
     const { id } = request.params as { id: string }
-    const body = request.body as { acknowledged_by?: string }
+    const body = (request.body as { acknowledged_by?: string }) ?? {}
 
     await query(`
       update price_alerts set
