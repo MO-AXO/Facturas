@@ -9,6 +9,12 @@ build/
 .next/
 out/
 
+# TypeScript compiled output (API compila a dist/, no trackear .js sueltos)
+apps/api/src/**/*.js
+apps/api/src/**/*.d.ts
+apps/web/src/**/*.js
+apps/web/src/**/*.d.ts
+
 # Environment variables
 .env
 .env.local
