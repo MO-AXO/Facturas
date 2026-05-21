@@ -30,19 +30,22 @@ export function Layout() {
     <div className="min-h-screen flex flex-col">
       {/* Topbar */}
       <header className="bg-white border-b px-6 py-3 flex items-center gap-6">
-        <span className="font-bold text-gray-900 text-base tracking-tight">
-          Facturas
-          <span className="ml-1.5 text-xs font-normal text-gray-400">PB Control</span>
+        <span className="font-bold text-gray-900 text-base tracking-tight flex items-center gap-2">
+          🐷 Pig Brothers
+          <span className="text-xs font-normal text-gray-400">Control de Gastos</span>
         </span>
         <nav className="flex items-center gap-1">
           <NavLink to="/invoices" className={navLinkClass}>
             Facturas
           </NavLink>
+          <NavLink to="/cash" className={navLinkClass}>
+            Caja Chica
+          </NavLink>
           <NavLink to="/suppliers" className={navLinkClass}>
             Proveedores
           </NavLink>
           <NavLink to="/catalog" className={navLinkClass}>
-            Catálogo
+            Productos
           </NavLink>
           <NavLink to="/alerts" className={navLinkClass}>
             Alertas

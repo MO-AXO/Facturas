@@ -86,21 +86,21 @@ export function CatalogPage() {
     <div className="max-w-4xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Cat\u00e1logo de SKUs</h1>
-          <p className="text-gray-500 text-sm mt-1">Productos internos con unidad can\u00f3nica</p>
+          <h1 className="text-2xl font-bold text-gray-900">Productos</h1>
+          <p className="text-gray-500 text-sm mt-1">Catálogo de insumos y productos del restaurante</p>
         </div>
         <button
           onClick={() => setShowForm(!showForm)}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
         >
-          + Nuevo SKU
+          + Nuevo producto
         </button>
       </div>
 
       {/* Formulario nuevo SKU */}
       {showForm && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-          <h2 className="font-semibold text-gray-800 mb-3">Nuevo SKU</h2>
+          <h2 className="font-semibold text-gray-800 mb-3">Nuevo producto</h2>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-gray-500 mb-1">C\u00f3digo interno *</label>
@@ -187,7 +187,7 @@ export function CatalogPage() {
         <div className="space-y-2">
           {skus.length === 0 && (
             <p className="text-gray-400 text-center py-12">
-              {search ? 'Sin resultados' : 'No hay SKUs en el cat\u00e1logo'}
+              {search ? 'Sin resultados' : 'No hay productos en el catálogo aún'}
             </p>
           )}
           {skus.map((sku) => (

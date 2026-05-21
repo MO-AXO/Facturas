@@ -6,9 +6,9 @@ import { InvoiceLineRow } from '../components/review/InvoiceLine'
 
 const statusLabel: Record<string, string> = {
   pending:    'En cola',
-  extracting: 'Extrayendo con IA...',
-  review:     'En revisión',
-  approved:   'Aprobada',
+  extracting: 'Leyendo factura con IA...',
+  review:     'Por revisar',
+  approved:   'Registrada',
   rejected:   'Rechazada',
   error:      'Error',
 }
@@ -102,7 +102,7 @@ export function ReviewPage() {
             disabled={!canApprove || approving}
             className="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-40 text-sm font-medium"
           >
-            {approving ? 'Aprobando...' : 'Aprobar todo'}
+            {approving ? 'Registrando...' : 'Registrar factura'}
           </button>
         </div>
       </div>
@@ -119,7 +119,7 @@ export function ReviewPage() {
             <div>
               <p className="font-medium text-blue-800">{statusLabel[invoice.status]}</p>
               <p className="text-sm text-blue-600">
-                {invoice.file_name} — Claude está leyendo la factura, esto toma unos segundos.
+                {invoice.file_name} — La IA está leyendo la factura, esto toma unos segundos.
               </p>
             </div>
           </div>

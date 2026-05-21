@@ -6,6 +6,7 @@ import { db } from './lib/db.js'
 import { runMigrations } from './lib/migrate.js'
 import { invoiceRoutes } from './routes/invoices.js'
 import { catalogRoutes } from './routes/catalog.js'
+import { cashRoutes } from './routes/cash.js'
 import { startInvoiceWorker } from './workers/invoice.worker.js'
 import { startPriceUpdateWorker } from './workers/price-update.worker.js'
 
@@ -25,6 +26,7 @@ await app.register(multipart, {
 
 await app.register(invoiceRoutes, { prefix: '/api' })
 await app.register(catalogRoutes, { prefix: '/api' })
+await app.register(cashRoutes,    { prefix: '/api' })
 
 app.get('/health', async () => ({
   ok: true,

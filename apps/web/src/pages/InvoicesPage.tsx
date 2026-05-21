@@ -6,8 +6,8 @@ import { invoicesApi, type InvoiceStatus } from '../lib/api'
 const statusLabel: Record<InvoiceStatus, string> = {
   pending: 'En cola',
   extracting: 'Extrayendo',
-  review: 'En revisión',
-  approved: 'Aprobada',
+  review: 'Por revisar',
+  approved: 'Registrada',
   rejected: 'Rechazada',
   error: 'Error',
 }
@@ -51,8 +51,8 @@ export function InvoicesPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Facturas</h1>
-          <p className="text-gray-500 text-sm mt-1">Procesamiento de facturas de proveedores</p>
+          <h1 className="text-2xl font-bold text-gray-900">Facturas de Proveedores</h1>
+          <p className="text-gray-500 text-sm mt-1">Facturas recibidas por correo y procesadas con IA</p>
         </div>
         <div>
           <input
@@ -70,7 +70,7 @@ export function InvoicesPage() {
             disabled={uploading}
             className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium text-sm"
           >
-            {uploading ? 'Subiendo...' : '+ Subir factura'}
+            {uploading ? 'Procesando...' : '+ Registrar factura'}
           </button>
         </div>
       </div>
@@ -86,7 +86,7 @@ export function InvoicesPage() {
           if (file) handleFileUpload(file)
         }}
       >
-        <p className="text-gray-400 text-sm">Arrastra una foto o PDF de factura aquí, o haz clic para seleccionar</p>
+        <p className="text-gray-400 text-sm">Arrastra el PDF de la factura aquí, o haz clic para seleccionar</p>
         <p className="text-gray-300 text-xs mt-1">JPG, PNG, WEBP, PDF · Máx 20MB</p>
       </div>
 
@@ -138,7 +138,7 @@ export function InvoicesPage() {
                   className="border-t hover:bg-gray-50 cursor-pointer"
                 >
                   <td className="px-4 py-3 font-medium text-sm">
-                    {invoice.suppliers?.name ?? <span className="text-gray-400 italic">Sin identificar</span>}
+                    {invoice.suppliers?.name ?? <span className="text-gray-400 italic">Proveedor desconocido</span>}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-500">{invoice.folio ?? '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-500">{invoice.invoice_date ?? '—'}</td>

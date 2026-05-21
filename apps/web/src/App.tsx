@@ -7,6 +7,7 @@ import { ReviewPage } from './pages/ReviewPage'
 import { AlertsPage } from './pages/AlertsPage'
 import { CatalogPage } from './pages/CatalogPage'
 import { SuppliersPage } from './pages/SuppliersPage'
+import { CashPage } from './pages/CashPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -50,6 +51,7 @@ export default function App() {
             {/* Páginas con layout (navbar) */}
             <Route element={<Layout />}>
               <Route path="/invoices" element={<InvoicesPage />} />
+              <Route path="/cash" element={<CashPage />} />
               <Route path="/suppliers" element={<SuppliersPage />} />
               <Route path="/catalog" element={<CatalogPage />} />
               <Route path="/alerts" element={<AlertsPage />} />
