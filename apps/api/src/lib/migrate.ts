@@ -11,7 +11,7 @@ import { db } from './db.js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const migrationsDir = join(__dirname, '../../../../packages/db/migrations')
 
-async function migrate() {
+export async function runMigrations() {
   // Tabla de control de migraciones
   await db.query(`
     create table if not exists _migrations (
@@ -41,11 +41,15 @@ async function migrate() {
     await db.query('insert into _migrations (filename) values ($1)', [file])
   }
 
-  console.log('Migraciones listas.')
-  await db.end()
+  console.log('[Migrate] Migraciones listas.')
 }
 
-migrate().catch((err) => {
-  console.error('Error en migración:', err.message)
-  process.exit(1)
-})
+// Permite correr directamente: node dist/lib/migrate.js
+if (process.argv[1]?.endsWith('migrate.js')) {
+  runMigrations()
+    .then(() => db.end())
+    .catch((err) => {
+      console.error('Error en migración:', err.message)
+      process.exit(1)
+    })
+}

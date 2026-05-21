@@ -3,10 +3,15 @@ import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import multipart from '@fastify/multipart'
 import { db } from './lib/db.js'
+import { runMigrations } from './lib/migrate.js'
 import { invoiceRoutes } from './routes/invoices.js'
 import { catalogRoutes } from './routes/catalog.js'
 import { startInvoiceWorker } from './workers/invoice.worker.js'
 import { startPriceUpdateWorker } from './workers/price-update.worker.js'
+
+// Correr migraciones antes de arrancar el servidor
+console.log('[Migrate] Corriendo migraciones...')
+await runMigrations()
 
 const app = Fastify({ logger: true })
 
