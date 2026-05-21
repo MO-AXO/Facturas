@@ -14,8 +14,16 @@ export function InvoiceLineRow({ line, invoiceId, onUpdated }: Props) {
   const [selectedSku, setSelectedSku] = useState<Sku | null>(
     line.skus ? { ...line.skus, description: null, category: null } : null
   )
-  const [quantity, setQuantity] = useState(line.matched_quantity ?? line.raw_quantity ?? '')
-  const [unitPrice, setUnitPrice] = useState(line.matched_unit_price ?? line.raw_unit_price ?? '')
+  const [quantity, setQuantity] = useState<string | number>(
+    line.matched_quantity != null ? Number(line.matched_quantity)
+    : line.raw_quantity != null   ? Number(line.raw_quantity)
+    : ''
+  )
+  const [unitPrice, setUnitPrice] = useState<string | number>(
+    line.matched_unit_price != null ? Number(line.matched_unit_price)
+    : line.raw_unit_price != null   ? Number(line.raw_unit_price)
+    : ''
+  )
   const [saving, setSaving] = useState(false)
 
   const isProblematic = line.match_status === 'manual' || line.match_status === 'new_sku'
@@ -80,7 +88,8 @@ export function InvoiceLineRow({ line, invoiceId, onUpdated }: Props) {
           />
         ) : (
           <span className="text-sm">
-            {line.matched_quantity ?? line.raw_quantity} {line.matched_unit ?? line.raw_unit}
+            {line.matched_quantity != null ? Number(line.matched_quantity) : line.raw_quantity}{' '}
+            {line.matched_unit ?? line.raw_unit}
           </span>
         )}
       </td>
@@ -96,7 +105,7 @@ export function InvoiceLineRow({ line, invoiceId, onUpdated }: Props) {
           />
         ) : (
           <span className="text-sm font-mono">
-            ${(line.matched_unit_price ?? line.raw_unit_price ?? 0).toFixed(2)}
+            ${Number(line.matched_unit_price ?? line.raw_unit_price ?? 0).toFixed(2)}
           </span>
         )}
       </td>

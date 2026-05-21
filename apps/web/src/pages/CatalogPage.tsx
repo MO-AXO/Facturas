@@ -44,7 +44,7 @@ function PriceHistoryPanel({ skuId }: { skuId: string }) {
           <tr key={i} className="border-t">
             <td className="py-1.5 text-gray-600">{e.invoice_date}</td>
             <td className="py-1.5 text-gray-500">{e.suppliers?.name ?? '—'}</td>
-            <td className="py-1.5 font-mono text-right">${e.unit_price?.toFixed(4)}</td>
+            <td className="py-1.5 font-mono text-right">${Number(e.unit_price).toFixed(4)}</td>
           </tr>
         ))}
       </tbody>

@@ -78,10 +78,17 @@ export function AlertsPage() {
                     {alert.suppliers?.name ?? 'Proveedor desconocido'}
                   </p>
                   <p className="mt-1 text-sm">
-                    <span className="font-mono text-gray-500">${alert.previous_price?.toFixed(2)}</span>
-                    <span className="mx-2 text-gray-300">\u2192</span>
+                    <span className="font-mono text-gray-500">${Number(alert.previous_price).toFixed(2)}</span>
+                    <span className="mx-2 text-gray-300">→</span>
                     <span className={`font-mono font-semibold ${isIncrease ? 'text-red-600' : 'text-green-600'}`}>
-                      ${alert.new_price?.toFixed(2)}
+                      ${Number(alert.new_price).toFixed(2)}
+                    </span>
+                    <span
+                      className={`ml-2 text-xs font-medium px-1.5 py-0.5 rounded ${
+                        isIncrease ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
+                      }`}
+                    >
+                      {isIncrease ? '+' : ''}{Number(alert.change_pct).toFixed(1)}%
                     </span>
                     <span
                       className={`ml-2 text-xs font-medium px-1.5 py-0.5 rounded ${
