@@ -90,13 +90,6 @@ export function AlertsPage() {
                     >
                       {isIncrease ? '+' : ''}{Number(alert.change_pct).toFixed(1)}%
                     </span>
-                    <span
-                      className={`ml-2 text-xs font-medium px-1.5 py-0.5 rounded ${
-                        isIncrease ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
-                      }`}
-                    >
-                      {isIncrease ? '+' : ''}{alert.change_pct?.toFixed(1)}%
-                    </span>
                   </p>
                 </div>
 

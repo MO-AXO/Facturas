@@ -143,7 +143,7 @@ export function InvoicesPage() {
                   <td className="px-4 py-3 text-sm text-gray-500">{invoice.folio ?? '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-500">{invoice.invoice_date ?? '—'}</td>
                   <td className="px-4 py-3 text-sm font-mono text-right">
-                    {invoice.total ? `$${invoice.total.toFixed(2)} ${invoice.currency}` : '—'}
+                    {invoice.total ? `$${Number(invoice.total).toFixed(2)} ${invoice.currency}` : '—'}
                   </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColor[invoice.status]}`}>
