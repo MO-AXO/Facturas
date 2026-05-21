@@ -3,5 +3,5 @@ builder = "nixpacks"
 buildCommand = "npm run build --workspace=@facturas/web"
 
 [deploy]
-startCommand = "npx serve apps/web/dist -l $PORT --single"
+startCommand = "npx serve dist -l $PORT --single"
 restartPolicyType = "on_failure"
