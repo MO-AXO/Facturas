@@ -24,12 +24,11 @@ export type ExtractedInvoice = {
   notes: string | null                 // observaciones del modelo
 }
 
-const SYSTEM_PROMPT = `Eres un experto en extracción de datos de facturas mexicanas de proveedores de restaurantes.
+const SYSTEM_PROMPT = `Eres un experto en extracción de datos de facturas de proveedores de restaurantes.
 
-Tu tarea: analizar la imagen o PDF de una factura y devolver un JSON estructurado con los datos.
+Tu tarea: analizar la imagen o PDF de una factura y llamar la herramienta extract_invoice con los datos extraídos.
 
 REGLAS:
-- Devuelve SOLO JSON válido, sin texto adicional, sin markdown
 - Si un campo no es legible, usa null
 - Las fechas van en formato YYYY-MM-DD
 - Los montos son números (no strings), sin símbolos de moneda
@@ -37,30 +36,43 @@ REGLAS:
 - La moneda default es "MXN" salvo que se indique otro
 - En "lines" incluye TODAS las líneas de producto, no omitas ninguna
 - El campo "confidence" refleja qué tan legible estaba la imagen (0.0 a 1.0)
-- En "notes" anota si hay algo poco claro o ambiguo
+- En "notes" anota si hay algo poco claro o ambiguo`
 
-SCHEMA ESPERADO:
-{
-  "supplier_name": "Nombre del proveedor tal como aparece",
-  "supplier_rfc": "RFC del proveedor o null",
-  "folio": "Número de factura/folio",
-  "invoice_date": "YYYY-MM-DD",
-  "subtotal": 1234.56,
-  "tax_amount": 197.53,
-  "total": 1432.09,
-  "currency": "MXN",
-  "lines": [
-    {
-      "description": "Descripción exacta del producto como aparece",
-      "quantity": 5.0,
-      "unit": "kg",
-      "unit_price": 89.50,
-      "subtotal": 447.50
-    }
-  ],
-  "confidence": 0.95,
-  "notes": null
-}`
+const EXTRACT_TOOL: Anthropic.Tool = {
+  name: 'extract_invoice',
+  description: 'Extrae los datos estructurados de una factura de proveedor',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      supplier_name: { type: 'string', description: 'Nombre del proveedor tal como aparece en la factura' },
+      supplier_rfc:  { type: 'string', description: 'RFC del proveedor' },
+      folio:         { type: 'string', description: 'Número de factura o folio' },
+      invoice_date:  { type: 'string', description: 'Fecha de la factura en formato YYYY-MM-DD' },
+      subtotal:      { type: 'number', description: 'Subtotal antes de impuestos' },
+      tax_amount:    { type: 'number', description: 'Total de impuestos (IVA u otros)' },
+      total:         { type: 'number', description: 'Total con impuestos' },
+      currency:      { type: 'string', description: 'Moneda, default MXN' },
+      lines: {
+        type: 'array',
+        description: 'Todas las líneas de producto de la factura',
+        items: {
+          type: 'object',
+          properties: {
+            description: { type: 'string', description: 'Descripción exacta del producto' },
+            quantity:    { type: 'number', description: 'Cantidad' },
+            unit:        { type: 'string', description: 'Unidad de medida (kg, lt, pza, etc.)' },
+            unit_price:  { type: 'number', description: 'Precio unitario' },
+            subtotal:    { type: 'number', description: 'Subtotal de la línea' },
+          },
+          required: ['description'],
+        },
+      },
+      confidence: { type: 'number', description: 'Qué tan legible estaba la imagen, de 0.0 a 1.0' },
+      notes:      { type: 'string', description: 'Observaciones sobre campos ambiguos o poco claros' },
+    },
+    required: ['lines', 'currency', 'confidence'],
+  },
+}
 
 export async function extractInvoiceData(
   imageBase64: string,
@@ -72,6 +84,8 @@ export async function extractInvoiceData(
     model: 'claude-sonnet-4-5',
     max_tokens: 4096,
     system: SYSTEM_PROMPT,
+    tools: [EXTRACT_TOOL],
+    tool_choice: { type: 'tool', name: 'extract_invoice' },
     messages: [
       {
         role: 'user',
@@ -102,11 +116,11 @@ export async function extractInvoiceData(
     ],
   })
 
-  const raw = message.content[0].type === 'text' ? message.content[0].text : ''
-
-  try {
-    return JSON.parse(raw) as ExtractedInvoice
-  } catch {
-    throw new Error(`Claude devolvió JSON inválido: ${raw.substring(0, 200)}`)
+  // Con tool_use, la respuesta siempre viene en tool_use block — JSON garantizado
+  const toolUse = message.content.find(b => b.type === 'tool_use') as Anthropic.ToolUseBlock | undefined
+  if (!toolUse) {
+    throw new Error('Claude no devolvió resultado de extracción')
   }
+
+  return toolUse.input as ExtractedInvoice
 }
