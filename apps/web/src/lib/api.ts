@@ -123,6 +123,25 @@ export const catalogApi = {
     api.patch(`/api/alerts/${id}/acknowledge`),
 
   // Analytics
+  monthlySummary: (month: string) =>
+    api.get<{
+      month: string
+      invoices: {
+        by_supplier: { supplier_id: string; supplier_name: string; invoice_count: number; total_spend: number; invoices: any[] }[]
+        total_amount: number
+        invoice_count: number
+      }
+      cash: {
+        expenses: { id: string; expense_date: string; description: string; amount: number; method: string; category: string }[]
+        total_amount: number
+        cash_amount: number
+        transfer_amount: number
+        expense_count: number
+      }
+      daily_spend: { day: string; total: number }[]
+      grand_total: number
+    }>('/api/analytics/monthly-summary', { params: { month } }),
+
   spendBySupplier: (days = 90) =>
     api.get<{ data: { id: string; name: string; total_spend: number; invoice_count: number; last_invoice_date: string }[] }>(
       '/api/analytics/spend-by-supplier', { params: { days } }

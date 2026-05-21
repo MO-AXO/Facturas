@@ -239,6 +239,107 @@ export async function catalogRoutes(fastify: FastifyInstance) {
     }
   })
 
+  // ── GET /analytics/monthly-summary ───────────────────────────────────────
+  // Resumen completo de un mes: facturas por proveedor + caja chica
+  fastify.get('/analytics/monthly-summary', async (request, reply) => {
+    const q     = request.query as any
+    const month = q.month ?? new Date().toISOString().slice(0, 7) // YYYY-MM
+
+    // Facturas aprobadas del mes por proveedor
+    const invoicesBySupplier = await query<any>(`
+      select
+        s.id                as supplier_id,
+        s.name              as supplier_name,
+        count(*)            as invoice_count,
+        sum(i.total)        as total_spend,
+        array_agg(json_build_object(
+          'id',           i.id,
+          'folio',        i.folio,
+          'invoice_date', i.invoice_date,
+          'total',        i.total,
+          'currency',     i.currency
+        ) order by i.invoice_date) as invoices
+      from invoices i
+      join suppliers s on s.id = i.supplier_id
+      where i.status = 'approved'
+        and i.total is not null
+        and to_char(i.invoice_date::date, 'YYYY-MM') = $1
+      group by s.id, s.name
+      order by total_spend desc
+    `, [month])
+
+    // Total facturas del mes (incluyendo sin proveedor)
+    const invoiceTotals = await queryOne<any>(`
+      select
+        count(*)     as invoice_count,
+        sum(total)   as total_amount
+      from invoices
+      where status = 'approved'
+        and total is not null
+        and to_char(invoice_date::date, 'YYYY-MM') = $1
+    `, [month])
+
+    // Gastos de caja chica del mes
+    const cashExpenses = await query<any>(`
+      select
+        id, expense_date, description, amount, method, category
+      from petty_cash_expenses
+      where to_char(expense_date, 'YYYY-MM') = $1
+      order by expense_date desc
+    `, [month])
+
+    const cashTotals = await queryOne<any>(`
+      select
+        count(*)                                                    as expense_count,
+        sum(amount)                                                 as total_amount,
+        sum(case when method = 'cash'     then amount else 0 end)  as cash_amount,
+        sum(case when method = 'transfer' then amount else 0 end)  as transfer_amount
+      from petty_cash_expenses
+      where to_char(expense_date, 'YYYY-MM') = $1
+    `, [month])
+
+    // Gasto total combinado dia a dia (facturas + caja chica) para sparkline
+    const dailySpend = await query<any>(`
+      select day, sum(amount) as total from (
+        select invoice_date::date as day, total as amount
+        from invoices
+        where status = 'approved' and total is not null
+          and to_char(invoice_date::date, 'YYYY-MM') = $1
+        union all
+        select expense_date as day, amount
+        from petty_cash_expenses
+        where to_char(expense_date, 'YYYY-MM') = $1
+      ) t
+      group by day
+      order by day
+    `, [month])
+
+    return {
+      month,
+      invoices: {
+        by_supplier: invoicesBySupplier.map(r => ({
+          ...r,
+          total_spend:   Number(r.total_spend   ?? 0),
+          invoice_count: Number(r.invoice_count),
+        })),
+        total_amount:  Number(invoiceTotals?.total_amount  ?? 0),
+        invoice_count: Number(invoiceTotals?.invoice_count ?? 0),
+      },
+      cash: {
+        expenses:        cashExpenses.map(r => ({ ...r, amount: Number(r.amount) })),
+        total_amount:    Number(cashTotals?.total_amount    ?? 0),
+        cash_amount:     Number(cashTotals?.cash_amount     ?? 0),
+        transfer_amount: Number(cashTotals?.transfer_amount ?? 0),
+        expense_count:   Number(cashTotals?.expense_count   ?? 0),
+      },
+      daily_spend: dailySpend.map(r => ({
+        day:   r.day,
+        total: Number(r.total ?? 0),
+      })),
+      grand_total: Number(invoiceTotals?.total_amount ?? 0) + Number(cashTotals?.total_amount ?? 0),
+    }
+  })
+
   // ── PATCH /alerts/:id/acknowledge ─────────────────────────────────────────
   fastify.patch('/alerts/:id/acknowledge', async (request, reply) => {
     const { id } = request.params as { id: string }
