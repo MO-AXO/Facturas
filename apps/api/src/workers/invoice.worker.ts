@@ -104,18 +104,28 @@ export function startInvoiceWorker() {
         const line = extracted.lines[i]
         const match = await matchLine(line, supplierId)
 
+        // Guardar sugerencia de SKU nuevo en override_notes como JSON
+        const suggestionNote = (match.match_status === 'manual' && line.suggested_sku_name)
+          ? JSON.stringify({
+              suggested_sku_name: line.suggested_sku_name,
+              suggested_sku_code: line.suggested_sku_code ?? null,
+              suggested_sku_unit: line.unit ?? null,
+            })
+          : null
+
         await query(`
           insert into invoice_lines (
             invoice_id, line_number,
             raw_description, raw_quantity, raw_unit, raw_unit_price, raw_subtotal,
             sku_id, matched_quantity, matched_unit, matched_unit_price,
-            match_status, match_confidence, match_method
-          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+            match_status, match_confidence, match_method, override_notes
+          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
         `, [
           invoiceId, i + 1,
           line.description, line.quantity, line.unit, line.unit_price, line.subtotal,
           match.sku_id, match.matched_quantity, match.matched_unit, match.matched_unit_price,
           match.match_status, match.match_confidence, match.match_method,
+          suggestionNote,
         ])
       }
 

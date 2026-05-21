@@ -24,6 +24,7 @@ export type InvoiceLine = {
   match_status: MatchStatus
   match_confidence: number | null
   match_method: string | null
+  override_notes: string | null   // JSON con sugerencia de SKU nuevo cuando match_status = 'manual'
   skus: { id: string; code: string; name: string; unit: string } | null
 }
 
@@ -72,6 +73,12 @@ export const invoicesApi = {
 
   updateLine: (invoiceId: string, lineId: string, data: Partial<InvoiceLine> & { sku_id?: string }) =>
     api.patch(`/api/invoices/${invoiceId}/lines/${lineId}`, data),
+
+  createSkuFromLine: (
+    invoiceId: string,
+    lineId: string,
+    data: { name: string; code: string; unit: string; category?: string; description?: string }
+  ) => api.post<{ ok: boolean; sku: Sku }>(`/api/invoices/${invoiceId}/lines/${lineId}/create-sku`, data),
 
   approve: (id: string) =>
     api.post(`/api/invoices/${id}/approve`),

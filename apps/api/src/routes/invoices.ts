@@ -152,6 +152,83 @@ export async function invoiceRoutes(fastify: FastifyInstance) {
     return { ok: true }
   })
 
+  // ── POST /invoices/:id/lines/:lineId/create-sku ───────────────────────────
+  // Crea un SKU nuevo a partir de la sugerencia de Claude, lo vincula a la línea
+  // y aprende el alias para el proveedor.
+  fastify.post('/invoices/:id/lines/:lineId/create-sku', async (request, reply) => {
+    const { id, lineId } = request.params as { id: string; lineId: string }
+    const body = (request.body as {
+      name: string
+      code: string
+      unit: string
+      category?: string
+      description?: string
+    }) ?? {}
+
+    if (!body.name || !body.code || !body.unit) {
+      return reply.status(400).send({ error: 'name, code y unit son requeridos' })
+    }
+
+    // Verificar que el código no esté duplicado
+    const existing = await queryOne<{ id: string }>(`
+      select id from skus where lower(code) = lower($1) limit 1
+    `, [body.code])
+    if (existing) {
+      return reply.status(409).send({ error: `Ya existe un SKU con código "${body.code}"` })
+    }
+
+    // Crear el SKU
+    const sku = await queryOne<{ id: string; code: string; name: string; unit: string }>(`
+      insert into skus (code, name, unit, category, description)
+      values ($1, $2, $3, $4, $5)
+      returning id, code, name, unit
+    `, [body.code.toUpperCase(), body.name, body.unit, body.category ?? null, body.description ?? null])
+
+    if (!sku) return reply.status(500).send({ error: 'Error creando SKU' })
+
+    // Leer la línea para obtener raw_description y la factura para obtener supplier_id
+    const line = await queryOne<{ raw_description: string; raw_unit: string | null }>(`
+      select raw_description, raw_unit from invoice_lines where id = $1
+    `, [lineId])
+
+    const invoice = await queryOne<{ supplier_id: string | null }>(`
+      select supplier_id from invoices where id = $1
+    `, [id])
+
+    // Aprender el alias raw_description → nuevo SKU para este proveedor
+    if (invoice?.supplier_id && line?.raw_description) {
+      await query(`
+        insert into sku_aliases (sku_id, supplier_id, alias, unit_alias, unit_factor, confirmed_by, confirmed_at, times_seen)
+        values ($1, $2, $3, $4, 1, 'operator', now(), 1)
+        on conflict (supplier_id, alias) do update set
+          sku_id       = excluded.sku_id,
+          confirmed_at = now(),
+          times_seen   = sku_aliases.times_seen + 1
+      `, [sku.id, invoice.supplier_id, line.raw_description.trim(), line.raw_unit])
+    }
+
+    // Vincular el SKU a la línea y marcarla como confirmed
+    const lineData = await queryOne<any>(`
+      select raw_quantity, raw_unit_price, raw_quantity as q from invoice_lines where id = $1
+    `, [lineId])
+
+    await query(`
+      update invoice_lines set
+        sku_id             = $1,
+        match_status       = 'confirmed',
+        match_confidence   = 1.0,
+        match_method       = 'new_sku',
+        matched_unit       = $2,
+        matched_quantity   = $3,
+        matched_unit_price = $4,
+        override_notes     = null,
+        updated_at         = now()
+      where id = $5
+    `, [sku.id, body.unit, lineData?.raw_quantity ?? null, lineData?.raw_unit_price ?? null, lineId])
+
+    return reply.status(201).send({ ok: true, sku })
+  })
+
   // ── POST /invoices/:id/approve ─────────────────────────────────────────────
   fastify.post('/invoices/:id/approve', async (request, reply) => {
     const { id } = request.params as { id: string }

@@ -8,6 +8,8 @@ export type ExtractedLine = {
   unit: string | null
   unit_price: number | null
   subtotal: number | null
+  suggested_sku_name: string | null   // nombre limpio sugerido por Claude para SKU nuevo
+  suggested_sku_code: string | null   // código corto sugerido (ej. "TOMATE-BOLA")
 }
 
 export type ExtractedInvoice = {
@@ -36,7 +38,12 @@ REGLAS:
 - La moneda default es "MXN" salvo que se indique otro
 - En "lines" incluye TODAS las líneas de producto, no omitas ninguna
 - El campo "confidence" refleja qué tan legible estaba la imagen (0.0 a 1.0)
-- En "notes" anota si hay algo poco claro o ambiguo`
+- En "notes" anota si hay algo poco claro o ambiguo
+- Para cada línea, sugiere un nombre limpio de SKU (suggested_sku_name) en español, normalizado
+  para un catálogo interno de restaurante: sin abreviaciones raras, en singular, con la unidad si aplica.
+  Ejemplos: "Tomate bola", "Pollo entero", "Aceite de oliva 1L", "Bolsa negra 60x90"
+- También sugiere un código corto (suggested_sku_code): mayúsculas, sin espacios, máx 16 caracteres.
+  Ejemplos: "TOMATE-BOLA", "POLLO-ENT", "ACEITE-OLIVA-1L"`
 
 const EXTRACT_TOOL: Anthropic.Tool = {
   name: 'extract_invoice',
@@ -58,11 +65,13 @@ const EXTRACT_TOOL: Anthropic.Tool = {
         items: {
           type: 'object',
           properties: {
-            description: { type: 'string', description: 'Descripción exacta del producto' },
-            quantity:    { type: 'number', description: 'Cantidad' },
-            unit:        { type: 'string', description: 'Unidad de medida (kg, lt, pza, etc.)' },
-            unit_price:  { type: 'number', description: 'Precio unitario' },
-            subtotal:    { type: 'number', description: 'Subtotal de la línea' },
+            description:         { type: 'string', description: 'Descripción exacta del producto tal como aparece en la factura' },
+            quantity:            { type: 'number', description: 'Cantidad' },
+            unit:                { type: 'string', description: 'Unidad de medida (kg, lt, pza, etc.)' },
+            unit_price:          { type: 'number', description: 'Precio unitario' },
+            subtotal:            { type: 'number', description: 'Subtotal de la línea' },
+            suggested_sku_name:  { type: 'string', description: 'Nombre limpio normalizado para el catálogo interno, en español, singular' },
+            suggested_sku_code:  { type: 'string', description: 'Código corto para el SKU: mayúsculas, sin espacios, máx 16 caracteres' },
           },
           required: ['description'],
         },
