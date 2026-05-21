@@ -48,13 +48,6 @@ export function Layout() {
             Alertas
             <AlertDot />
           </NavLink>
-          <NavLink to="/catalog" className={navLinkClass}>
-            Cat\u00e1logo
-          </NavLink>
-          <NavLink to="/alerts" className={navLinkClass}>
-            Alertas
-            <AlertDot />
-          </NavLink>
         </nav>
       </header>
 
