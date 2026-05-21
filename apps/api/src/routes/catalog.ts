@@ -152,7 +152,7 @@ export async function catalogRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /analytics/spend-by-supplier ──────────────────────────────────────
-  // Gasto total por proveedor en un periodo
+  // Gasto total por proveedor usando total de facturas aprobadas
   fastify.get('/analytics/spend-by-supplier', async (request, reply) => {
     const q = request.query as any
     const days = parseInt(q.days ?? '90')
@@ -161,13 +161,15 @@ export async function catalogRoutes(fastify: FastifyInstance) {
       select
         s.id,
         s.name,
-        sum(ph.unit_price * il.matched_quantity) as total_spend,
-        count(distinct ph.invoice_id)            as invoice_count,
-        max(ph.invoice_date)                     as last_invoice_date
-      from price_history ph
-      join suppliers s  on s.id  = ph.supplier_id
-      join invoice_lines il on il.id = ph.invoice_line_id
-      where ph.invoice_date >= current_date - ($1 || ' days')::interval
+        sum(i.total)                as total_spend,
+        count(*)                    as invoice_count,
+        max(i.invoice_date::date)   as last_invoice_date
+      from invoices i
+      join suppliers s on s.id = i.supplier_id
+      where i.status = 'approved'
+        and i.invoice_date is not null
+        and i.invoice_date::date >= current_date - ($1 || ' days')::interval
+        and i.total is not null
       group by s.id, s.name
       order by total_spend desc
     `, [days])
@@ -176,7 +178,7 @@ export async function catalogRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /analytics/spend-over-time ────────────────────────────────────────
-  // Gasto mensual agregado (todos los proveedores o uno solo)
+  // Gasto mensual usando total de facturas aprobadas
   fastify.get('/analytics/spend-over-time', async (request, reply) => {
     const q = request.query as any
     const days       = parseInt(q.days ?? '365')
@@ -184,21 +186,23 @@ export async function catalogRoutes(fastify: FastifyInstance) {
 
     const rows = await query<any>(`
       select
-        to_char(date_trunc('month', ph.invoice_date), 'YYYY-MM') as month,
-        sum(ph.unit_price * il.matched_quantity)                   as total_spend
-      from price_history ph
-      join invoice_lines il on il.id = ph.invoice_line_id
-      where ph.invoice_date >= current_date - ($1 || ' days')::interval
-        and ($2::uuid is null or ph.supplier_id = $2::uuid)
-      group by date_trunc('month', ph.invoice_date)
-      order by date_trunc('month', ph.invoice_date)
+        to_char(date_trunc('month', i.invoice_date::date), 'YYYY-MM') as month,
+        sum(i.total) as total_spend
+      from invoices i
+      where i.status = 'approved'
+        and i.invoice_date is not null
+        and i.invoice_date::date >= current_date - ($1 || ' days')::interval
+        and i.total is not null
+        and ($2::uuid is null or i.supplier_id = $2::uuid)
+      group by date_trunc('month', i.invoice_date::date)
+      order by date_trunc('month', i.invoice_date::date)
     `, [days, supplierId])
 
     return { data: rows.map(r => ({ month: r.month, total_spend: Number(r.total_spend ?? 0) })) }
   })
 
   // ── GET /analytics/top-skus ───────────────────────────────────────────────
-  // Top SKUs por gasto para un proveedor o global
+  // Top productos por gasto (desde price_history cuando hay SKUs, sino vacío)
   fastify.get('/analytics/top-skus', async (request, reply) => {
     const q = request.query as any
     const days       = parseInt(q.days ?? '90')
@@ -208,14 +212,14 @@ export async function catalogRoutes(fastify: FastifyInstance) {
     const rows = await query<any>(`
       select
         sk.id, sk.code, sk.name, sk.unit,
-        sum(ph.unit_price * il.matched_quantity) as total_spend,
-        avg(ph.unit_price)                        as avg_price,
-        max(ph.unit_price)                        as max_price,
-        min(ph.unit_price)                        as min_price,
-        count(*)                                  as purchase_count
+        sum(ph.unit_price * coalesce(il.matched_quantity, 1)) as total_spend,
+        avg(ph.unit_price)                                     as avg_price,
+        max(ph.unit_price)                                     as max_price,
+        min(ph.unit_price)                                     as min_price,
+        count(*)                                               as purchase_count
       from price_history ph
-      join skus sk         on sk.id = ph.sku_id
-      join invoice_lines il on il.id = ph.invoice_line_id
+      join skus sk on sk.id = ph.sku_id
+      left join invoice_lines il on il.id = ph.invoice_line_id
       where ph.invoice_date >= current_date - ($1 || ' days')::interval
         and ($2::uuid is null or ph.supplier_id = $2::uuid)
       group by sk.id, sk.code, sk.name, sk.unit
