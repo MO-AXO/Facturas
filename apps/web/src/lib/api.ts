@@ -80,12 +80,31 @@ export const invoicesApi = {
     api.post(`/api/invoices/${id}/reject`, { reason }),
 }
 
+export type Supplier = {
+  id: string
+  name: string
+  rfc: string | null
+  email: string | null
+  phone: string | null
+  notes: string | null
+  active: boolean
+}
+
 export const catalogApi = {
   searchSkus: (search: string) =>
     api.get<{ data: Sku[] }>('/api/skus', { params: { search } }),
 
   listSuppliers: () =>
-    api.get<{ data: { id: string; name: string; rfc: string | null }[] }>('/api/suppliers'),
+    api.get<{ data: Supplier[] }>('/api/suppliers'),
+
+  getSupplier: (id: string) =>
+    api.get<Supplier>(`/api/suppliers/${id}`),
+
+  updateSupplier: (id: string, data: Partial<Supplier>) =>
+    api.patch<Supplier>(`/api/suppliers/${id}`, data),
+
+  createSupplier: (data: { name: string; rfc?: string; email?: string; phone?: string }) =>
+    api.post<Supplier>('/api/suppliers', data),
 
   priceHistory: (skuId: string, days?: number) =>
     api.get(`/api/price-history/${skuId}`, { params: { days } }),
@@ -95,4 +114,20 @@ export const catalogApi = {
 
   acknowledgeAlert: (id: string) =>
     api.patch(`/api/alerts/${id}/acknowledge`),
+
+  // Analytics
+  spendBySupplier: (days = 90) =>
+    api.get<{ data: { id: string; name: string; total_spend: number; invoice_count: number; last_invoice_date: string }[] }>(
+      '/api/analytics/spend-by-supplier', { params: { days } }
+    ),
+
+  spendOverTime: (days = 365, supplierId?: string) =>
+    api.get<{ data: { month: string; total_spend: number }[] }>(
+      '/api/analytics/spend-over-time', { params: { days, supplier_id: supplierId } }
+    ),
+
+  topSkus: (days = 90, supplierId?: string, limit = 10) =>
+    api.get<{ data: { id: string; code: string; name: string; unit: string; total_spend: number; avg_price: number; purchase_count: number }[] }>(
+      '/api/analytics/top-skus', { params: { days, supplier_id: supplierId, limit } }
+    ),
 }

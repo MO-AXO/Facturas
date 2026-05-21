@@ -38,6 +38,16 @@ export function Layout() {
           <NavLink to="/invoices" className={navLinkClass}>
             Facturas
           </NavLink>
+          <NavLink to="/suppliers" className={navLinkClass}>
+            Proveedores
+          </NavLink>
+          <NavLink to="/catalog" className={navLinkClass}>
+            Catálogo
+          </NavLink>
+          <NavLink to="/alerts" className={navLinkClass}>
+            Alertas
+            <AlertDot />
+          </NavLink>
           <NavLink to="/catalog" className={navLinkClass}>
             Cat\u00e1logo
           </NavLink>
